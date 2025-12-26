@@ -1,10 +1,11 @@
 from .base_agent import BaseAgent
 from typing import List
+from openai import OpenAI
 
 class JudgeAgent(BaseAgent):
     """An agent that judges whether other agents are in agreement."""
-    def __init__(self, api_key: str, model: str, prompt_template: str):
-        super().__init__(api_key, model, prompt_template)
+    def __init__(self, client: OpenAI, model: str, prompt_template: str):
+        super().__init__(client, model, prompt_template)
 
     def check_agreement(self, agent_responses: List[str]) -> bool:
         """

@@ -1,11 +1,11 @@
 import time
-from typing import List, Dict, Any
+from typing import List, Dict
 from openai import OpenAI
 
 class BaseAgent:
     """A base class for all AI-powered agents."""
-    def __init__(self, api_key: str, model: str, system_prompt: str):
-        self.client = OpenAI(api_key=api_key)
+    def __init__(self, client: OpenAI, model: str, system_prompt: str):
+        self.client = client
         self.model = model
         self.system_prompt = system_prompt
         self.context: List[Dict[str, str]] = [{"role": "system", "content": self.system_prompt}]

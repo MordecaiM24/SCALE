@@ -8,6 +8,7 @@ from agents.mediator_agent import MediatorAgent
 from agents.human_expert import HumanExpert
 from utils.logger import Logger
 from utils.config_loader import load_codebook
+from openai import OpenAI
 
 class ContentAnalysisSimulation:
     def __init__(self, config: Dict[str, Any], logger: Logger):
@@ -27,12 +28,17 @@ class ContentAnalysisSimulation:
 
         # Coder Simulation
         self.logger.log("********** Bot Annotation **********\n")
-        self.api_key = config['api_key']
+
+        client_kwargs = {"api_key": config['api_key']}
+        if 'base_url' in config.get('settings', {}):
+            client_kwargs["base_url"] = config['settings']['base_url']
+        self.client = OpenAI(**client_kwargs)
+
         self.codebook = load_codebook(config['dataset_name'], config['paths']['data_path'])
         
         self.scientists = self._create_scientists()
-        self.judge = JudgeAgent(self.api_key, self.model, config['prompt']['judge'])
-        self.mediator = MediatorAgent(self.api_key, self.model, config['prompt']['mediator'])
+        self.judge = JudgeAgent(self.client, self.model, config['prompt']['judge'])
+        self.mediator = MediatorAgent(self.client, self.model, config['prompt']['mediator'])
         self.logger.log(f"Initialized {self.num_agents} Social Scientist Agents For {self.config['dataset_name']} Task.\n")
 
         # Intervention settings
@@ -52,7 +58,7 @@ class ContentAnalysisSimulation:
         personas = list(self.config['persona'].values())
         for i in range(self.num_agents):
             agent = SocialScientistAgent(
-                api_key=self.api_key,
+                client=self.client,
                 model=self.model,
                 persona=personas[i],
                 codebook=self.codebook,

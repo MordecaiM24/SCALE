@@ -1,14 +1,15 @@
 from .base_agent import BaseAgent
 from typing import List, Dict
+from openai import OpenAI
 
 class SocialScientistAgent(BaseAgent):
     """Represents an LLM agent emulating a social scientist."""
-    def __init__(self, api_key: str, model: str, persona: str, codebook: str):
+    def __init__(self, client: OpenAI, model: str, persona: str, codebook: str):
         self.persona = persona
         self.codebook = codebook
         # system_prompt = f"Persona:\n{persona}\n\nCODEBOOK:\n{codebook}\n\nINSTRUCTION:\n{instruction}"
         system_prompt = f"Persona:\n{persona}\n\nCODEBOOK:\n{codebook}"
-        super().__init__(api_key, model, system_prompt)
+        super().__init__(client, model, system_prompt)
 
     def code_text(self, text: str) -> str:
         """Codes a single piece of text based on the codebook and persona."""
