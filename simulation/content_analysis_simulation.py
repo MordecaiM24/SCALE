@@ -149,8 +149,6 @@ class ContentAnalysisSimulation:
     def _run_coding_phase(self, chunk: pd.Series):
         self.logger.log("********** Bot Annotation **********\n")
 
-        for agent in self.scientists:
-            agent.add_user_message(self.config['prompt']['coding'])
     
         coding_results: Dict[str, List[CodingResponse]] = {}
         coding_agreements: Dict[str, bool] = {}
@@ -160,6 +158,9 @@ class ContentAnalysisSimulation:
             text_id = f"Text-{chunk.index[i]+1}"
             self.logger.log(f"--- Coding {text_id} ---\n{text}\n")
             
+            for agent in self.scientists:
+                agent.reset_context()
+                agent.add_user_message(self.config['prompt']['coding'])
             responses = [agent.code_text(text) for agent in self.scientists]
             for j, response in enumerate(responses):
                 self.logger.log(f"Agent {j+1}: {response}\n")
@@ -174,9 +175,6 @@ class ContentAnalysisSimulation:
     def _run_discussion_phase(self, chunk: pd.Series, coding_results: Dict, coding_agreements: Dict):
         self.logger.log("********** Agent Discussion **********\n")
 
-        for agent in self.scientists:
-            agent.add_user_message(self.config['prompt']['discussion'])
-
         discussion_results: Dict[str, List[List[CodingResponse]]] = {}
         final_answers: Dict[str, List[CodingResponse]] = {}
         final_agreements: Dict[str, bool] = {}
@@ -186,6 +184,10 @@ class ContentAnalysisSimulation:
             text_id = f"Text-{chunk.index[i]+1}"
             if not coding_agreements[text_id]:
                 self.logger.log(f"\n--- Discussing {text_id} ---\n")
+                for agent in self.scientists:
+                    agent.reset_context()
+                    agent.add_user_message(self.config['prompt']['discussion'])
+                
                 discussion_history: List[List[CodingResponse]] = [coding_results[text_id]]
 
                 agreement = False
@@ -232,12 +234,17 @@ class ContentAnalysisSimulation:
             f"Example UPDATED CODEBOOK:\n{self.config['codebook_example']['updated']}"
         )
         for agent in self.scientists:
+            agent.reset_context()
             agent.add_user_message(update_prompt)
         
         self.logger.log("--- Agents Proposing Initial Codebook Updates ---\n")
         proposals = [agent.propose_codebook_update(self.codebook) for agent in self.scientists]
         for i, proposal in enumerate(proposals):
             self.logger.log(f"Agent {i+1}'s Proposal: {proposal}\n")
+
+        if all(not p.need_update for p in proposals):
+            self.logger.log("--- No codebook changes proposed. Keeping current codebook. ---\n")
+            return
             
         # *** HUMAN INTERVENTION POINT (CODEBOOK PROPOSAL) ***
         if self.intervention_enabled and self.intervention_scope == 'extensive':
