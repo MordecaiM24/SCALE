@@ -1,6 +1,6 @@
 import pandas as pd
 import os
-from typing import List, Dict, Any
+from typing import List, Dict, Any, Optional
 
 from agents.social_scientist_agent import SocialScientistAgent
 from agents.judge_agent import JudgeAgent
@@ -11,11 +11,13 @@ from utils.config_loader import load_codebook
 from openai import OpenAI
 
 from utils.types import CodingResponse
+from evaluator import Evaluator, load_ground_truth
 
 class ContentAnalysisSimulation:
-    def __init__(self, config: Dict[str, Any], logger: Logger):
+    def __init__(self, config: Dict[str, Any], logger: Logger, run_id: int = 0):
         self.config = config
         self.logger = logger
+        self.run_id = run_id
         
         # Simulation parameters
         self.num_agents = config['settings']['agents']
@@ -53,6 +55,9 @@ class ContentAnalysisSimulation:
         else:
             self.human_expert = None
         
+        # Initialize evaluator with ground truth
+        self._init_evaluator(df)
+        
 
     def _create_scientists(self) -> List[SocialScientistAgent]:
         """Initializes the SocialScientistAgent instances."""
@@ -67,6 +72,11 @@ class ContentAnalysisSimulation:
             )
             scientists.append(agent)
         return scientists
+    
+    def _init_evaluator(self, df):
+        """Initialize the evaluator with ground truth from the dataset."""
+        self.ground_truth = load_ground_truth(df)
+        self.evaluator = Evaluator(self.ground_truth)
 
 
     def _human_intervention(self, phase: str) -> bool:
@@ -89,17 +99,22 @@ class ContentAnalysisSimulation:
             return False
 
 
-    def run(self):
+    def run(self) -> Dict[str, Any]:
         """Runs the entire content analysis simulation loop."""
         full_log = []
+        all_coding_results = {}
+        all_final_answers = {}
+        
         for i, chunk in enumerate(self.text_chunks):
             self.logger.log(f"===== Processing Chunk {i+1}/{len(self.text_chunks)} =====\n")
             
             # Bot Annotation
             coding_results, coding_agreements = self._run_coding_phase(chunk)
+            all_coding_results.update(coding_results)
             
             # Agent Discussion
             discussion_results, final_answers, final_agreements = self._run_discussion_phase(chunk, coding_results, coding_agreements)
+            all_final_answers.update(final_answers)
             
             # Codebook Evolution
             self._run_codebook_evolution_phase()
@@ -114,8 +129,22 @@ class ContentAnalysisSimulation:
             full_log.append(chunk_log)
             self.logger.save_json(chunk_log, f'chunk_{i}_results.json')
         
+        # Evaluate results
+        self.logger.log("\n" + "=" * 50)
+        self.logger.log("EVALUATION RESULTS")
+        self.logger.log("=" * 50)
+        
+        eval_result = self.evaluator.evaluate_run(
+            all_coding_results,
+            all_final_answers if all_final_answers else None,
+            log_fn=self.logger.log
+        )
+        
         self.logger.save_json(full_log, 'full_simulation_log.json')
-        self.logger.log("===== Simulation Complete =====\n")
+        self.logger.save_json(eval_result, 'evaluation_results.json')
+        self.logger.log("\n===== Simulation Complete =====\n")
+        
+        return eval_result
 
     def _run_coding_phase(self, chunk: pd.Series):
         self.logger.log("********** Bot Annotation **********\n")
@@ -260,3 +289,7 @@ class ContentAnalysisSimulation:
         for agent in self.scientists:
             agent.update_codebook(self.codebook)
         self.logger.log("--- Final Codebook Adopted and Updated for all Agents. ---\n")
+    
+    def get_evaluator(self) -> Evaluator:
+        """Return the evaluator instance for multi-run aggregation."""
+        return self.evaluator
