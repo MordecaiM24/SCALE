@@ -1,6 +1,8 @@
 from .base_agent import BaseAgent
-from typing import List, Dict
+from typing import List
 from openai import OpenAI
+from utils.types import CodingResponse, CodebookUpdate
+
 
 class SocialScientistAgent(BaseAgent):
     """Represents an LLM agent emulating a social scientist."""
@@ -11,15 +13,15 @@ class SocialScientistAgent(BaseAgent):
         system_prompt = f"Persona:\n{persona}\n\nCODEBOOK:\n{codebook}"
         super().__init__(client, model, system_prompt)
 
-    def code_text(self, text: str) -> str:
+    def code_text(self, text: str) -> CodingResponse:
         """Codes a single piece of text based on the codebook and persona."""
         coding_prompt = f"TEXT:\n{text}"
         self.add_user_message(coding_prompt)
-        response = self._generate_answer()
+        response = self._generate_answer(response_format=CodingResponse)
         self.add_assistant_message(response)
         return response
 
-    def discuss(self, text: str, your_answer: str, other_answers: List[str]) -> str:
+    def discuss(self, text: str, your_answer: CodingResponse, other_answers: List[CodingResponse]) -> CodingResponse:
         """Participates in a discussion to resolve coding disagreements."""
         other_answers_formatted = "\n\n".join(
             [f"Another agent's response:\n{ans}" for ans in other_answers]
@@ -30,34 +32,38 @@ class SocialScientistAgent(BaseAgent):
             f"RESPONSES FROM OTHERS:\n{other_answers_formatted}"
         )
         self.add_user_message(discussion_prompt)
-        response = self._generate_answer()
+        response = self._generate_answer(response_format=CodingResponse)
         self.add_assistant_message(response)
         return response
 
-    def receive_intervention(self, intervention_prompt: str) -> str:
+    def inject_intervention(self, intervention_prompt: str) -> None:
         """
-        Processes an intervention prompt from a human expert and generates a new response.
-        This allows the agent's behavior to be guided mid-task.
+        Injects human intervention guidance into the agent's context.
+        
+        The intervention is freeform text that will influence the agent's next response.
+        After injection, call the appropriate phase method (discuss, review_mediated_codebook, etc.)
+        to get a properly typed response.
         """
         self.add_user_message(intervention_prompt)
-        response = self._generate_answer()
-        self.add_assistant_message(response)
-        return response
 
-    def propose_codebook_update(self, orginal_codebook) -> str:
+    def propose_codebook_update(self, orginal_codebook) -> CodebookUpdate:
         """Proposes changes to the codebook based on recent analysis."""
         update_prompt = (
             f"ORIGINAL CODEBOOK:\n{orginal_codebook}"
         )
         self.add_user_message(update_prompt)
-        response = self._generate_answer()
+        response = self._generate_answer(response_format=CodebookUpdate)
         self.add_assistant_message(response)
         return response
 
-    def review_mediated_codebook(self, mediator_summary: str) -> str:
-        """Reviews the summary from the Mediator and provides a final opinion."""
+    def review_mediated_codebook(self, mediator_summary: str) -> CodebookUpdate:
+        """Reviews the summary from the Mediator and provides a final opinion.
+        
+        Returns CodebookUpdate with need_update=False if agreeing, 
+        or need_update=True with new_codebook if proposing changes.
+        """
         self.add_user_message(mediator_summary)
-        response = self._generate_answer()
+        response = self._generate_answer(response_format=CodebookUpdate)
         self.add_assistant_message(response)
         return response
         

@@ -10,6 +10,8 @@ from utils.logger import Logger
 from utils.config_loader import load_codebook
 from openai import OpenAI
 
+from utils.types import CodingResponse
+
 class ContentAnalysisSimulation:
     def __init__(self, config: Dict[str, Any], logger: Logger):
         self.config = config
@@ -37,7 +39,7 @@ class ContentAnalysisSimulation:
         self.codebook = load_codebook(config['dataset_name'], config['paths']['data_path'])
         
         self.scientists = self._create_scientists()
-        self.judge = JudgeAgent(self.client, self.model, config['prompt']['judge'])
+        self.judge = JudgeAgent()
         self.mediator = MediatorAgent(self.client, self.model, config['prompt']['mediator'])
         self.logger.log(f"Initialized {self.num_agents} Social Scientist Agents For {self.config['dataset_name']} Task.\n")
 
@@ -67,20 +69,24 @@ class ContentAnalysisSimulation:
         return scientists
 
 
-    def _human_intervention(self, phase: str) -> str:
-        # *** HUMAN INTERVENTION POINT (DISCUSSION) ***
+    def _human_intervention(self, phase: str) -> bool:
+        """Inject human intervention guidance into all agents' context.
+        
+        The intervention is freeform text. After injection, the calling code should
+        re-run the appropriate phase method to get properly typed responses.
+        
+        Returns True if intervention was provided, False otherwise.
+        """
         intervention_prompt = self.human_expert.intervene()
         if intervention_prompt:
             self.logger.log(f"!!! {self.intervention_authority.upper()} Intervention on {phase} Activated !!!\n")
             self.logger.log(f"Intervention Prompt:\n{intervention_prompt}\n")
-            intervened_responses = [agent.receive_intervention(intervention_prompt) for agent in self.scientists]
-            for k, response in enumerate(intervened_responses):
-                self.logger.log(f"Agent {k+1} {phase} (Post-Intervention): {response}\n")
-
-            return intervened_responses
+            for agent in self.scientists:
+                agent.inject_intervention(intervention_prompt)
+            return True
         else:
             self.logger.log(f"No intervention provided for {phase}. Continuing without changes.\n")
-            return None
+            return False
 
 
     def run(self):
@@ -117,8 +123,8 @@ class ContentAnalysisSimulation:
         for agent in self.scientists:
             agent.add_user_message(self.config['prompt']['coding'])
     
-        coding_results = {}
-        coding_agreements = {}
+        coding_results: Dict[str, List[CodingResponse]] = {}
+        coding_agreements: Dict[str, bool] = {}
 
         self.logger.log("--- Agents Coding Texts ---\n")
         for i, text in enumerate(chunk):
@@ -142,17 +148,18 @@ class ContentAnalysisSimulation:
         for agent in self.scientists:
             agent.add_user_message(self.config['prompt']['discussion'])
 
-        discussion_results = {}
-        final_answers = {}
-        final_agreements = {}
+        discussion_results: Dict[str, List[List[CodingResponse]]] = {}
+        final_answers: Dict[str, List[CodingResponse]] = {}
+        final_agreements: Dict[str, bool] = {}
 
         self.logger.log("\n--- Agents Discussing Disagreements ---\n")
         for i, text in enumerate(chunk):
             text_id = f"Text-{chunk.index[i]+1}"
             if not coding_agreements[text_id]:
                 self.logger.log(f"\n--- Discussing {text_id} ---\n")
-                discussion_history = [coding_results[text_id]]
+                discussion_history: List[List[CodingResponse]] = [coding_results[text_id]]
 
+                agreement = False
                 for round_num in range(self.discussion_rounds):
                     self.logger.log(f"<Discussion Round {round_num + 1}>\n")
                     current_answers = discussion_history[-1]
@@ -164,8 +171,12 @@ class ContentAnalysisSimulation:
                     
                     # *** HUMAN INTERVENTION POINT (DISCUSSION) ***
                     if self.intervention_enabled:
-                        intervened_answers = self._human_intervention(phase='discussion')
-                        if intervened_answers: next_round_answers = intervened_answers
+                        if self._human_intervention(phase='discussion'):
+                            # Re-run discuss with intervention context injected
+                            next_round_answers = [agent.discuss(text, current_answers[j], current_answers[:j] + current_answers[j+1:])
+                                                  for j, agent in enumerate(self.scientists)]
+                            for j, answer in enumerate(next_round_answers):
+                                self.logger.log(f"Agent {j+1} (Post-Intervention): {answer}\n")
                     # *** END INTERVENTION ***
 
                     discussion_history.append(next_round_answers)
@@ -199,9 +210,13 @@ class ContentAnalysisSimulation:
         for i, proposal in enumerate(proposals):
             self.logger.log(f"Agent {i+1}'s Proposal: {proposal}\n")
             
+        # *** HUMAN INTERVENTION POINT (CODEBOOK PROPOSAL) ***
         if self.intervention_enabled and self.intervention_scope == 'extensive':
-            intervened = self._human_intervention(phase='codebook proposal')
-            if intervened: proposals = intervened
+            if self._human_intervention(phase='codebook proposal'):
+                # Re-run proposal with intervention context injected
+                proposals = [agent.propose_codebook_update(self.codebook) for agent in self.scientists]
+                for i, proposal in enumerate(proposals):
+                    self.logger.log(f"Agent {i+1}'s Proposal (Post-Intervention): {proposal}\n")
         
         # Multi-round mediation and review loop
         current_proposals = proposals
@@ -221,11 +236,15 @@ class ContentAnalysisSimulation:
             
             final_codebook = mediator_summary # Store the latest mediated version
 
+            # *** HUMAN INTERVENTION POINT (CODEBOOK REVIEW) ***
             if self.intervention_enabled and self.intervention_scope == 'extensive':
-                intervened_opinions = self._human_intervention(phase=f'codebook review round {round_num+1}')
-                if intervened_opinions: opinions = intervened_opinions
+                if self._human_intervention(phase=f'codebook review round {round_num+1}'):
+                    # Re-run review with intervention context injected
+                    opinions = [agent.review_mediated_codebook(mediator_message) for agent in self.scientists]
+                    for i, opinion in enumerate(opinions):
+                        self.logger.log(f"Agent {i+1}'s Opinion (Post-Intervention): {opinion}\n")
 
-            agreement = self.judge.check_agreement(opinions)
+            agreement = self.judge.check_codebook_agreement(opinions)
             self.logger.log(f"Codebook Agreement Verdict: {'Yes' if agreement else 'No'}\n")
             
             if agreement:

@@ -2,6 +2,7 @@ import json
 import os
 from datetime import datetime
 from typing import Dict, Any, List
+from pydantic import BaseModel
 
 class Logger:
     """Handles logging of the simulation process to console and files."""
@@ -24,4 +25,10 @@ class Logger:
         """Saves data to a JSON file in the log directory."""
         path = os.path.join(self.log_dir, filename)
         with open(path, 'w', encoding='utf-8') as f:
-            json.dump(data, f, indent=4)
+            json.dump(data, f, indent=4, default=self._json_encoder)
+    
+    ## Helper function to encode BaseModel objects to dicts
+    def _json_encoder(self, obj: Any) -> Any:
+        if isinstance(obj, BaseModel):
+            return obj.model_dump()
+        return obj

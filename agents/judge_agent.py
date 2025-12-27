@@ -1,28 +1,29 @@
-from .base_agent import BaseAgent
-from typing import List
-from openai import OpenAI
+from typing import List, Any
+from utils.types import CodingResponse, CodebookUpdate
 
-class JudgeAgent(BaseAgent):
-    """An agent that judges whether other agents are in agreement."""
-    def __init__(self, client: OpenAI, model: str, prompt_template: str):
-        super().__init__(client, model, prompt_template)
-
-    def check_agreement(self, agent_responses: List[str]) -> bool:
+class JudgeAgent:
+    """A judge that judges whether other agents are in agreement."""
+    def check_agreement(self, agent_responses: List[CodingResponse]) -> bool:
         """
         Compares agent responses and judges if they are the same.
         Returns True for agreement, False for disagreement.
         """
-        self.reset_context()
+        if len(agent_responses) == 0:
+            return False
         
-        check_prompt = "Here are the answer from other social scientists:\n\n"
-        for i, response in enumerate(agent_responses):
-            check_prompt += f"Agent {i+1} response:\n{response}\n\n"
+        if len(agent_responses) == 1:
+            return True
         
-        self.add_user_message(check_prompt)
+        codes = [response.code for response in agent_responses]
         
-        judgement = self._generate_answer()
-        self.add_assistant_message(judgement)
+        return len(set(codes)) == 1
+
+    def check_codebook_agreement(self, agent_responses: List[CodebookUpdate]) -> bool:
+        """
+        Checks if all agents agree with the mediated codebook.
+        Returns True if all agents have need_update=False (all agree).
+        """
+        if len(agent_responses) == 0:
+            return False
         
-        self.reset_context() # Reset after each judgment
-        
-        return "same" in judgement.lower() and "different" not in judgement.lower()
+        return all(not response.need_update for response in agent_responses)
