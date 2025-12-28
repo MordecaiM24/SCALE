@@ -133,10 +133,22 @@ class ContentAnalysisSimulation:
         self.logger.log("\n" + "=" * 50)
         self.logger.log("EVALUATION RESULTS")
         self.logger.log("=" * 50)
+        merged_post_discussion = {}
+        for text_id, coding_responses in all_coding_results.items():
+            if text_id in all_final_answers:
+                merged_post_discussion[text_id] = all_final_answers[text_id]
+            else:
+                merged_post_discussion[text_id] = coding_responses
         
         eval_result = self.evaluator.evaluate_run(
             all_coding_results,
-            all_final_answers if all_final_answers else None,
+            merged_post_discussion if merged_post_discussion else None,
+            log_fn=self.logger.log
+        )
+
+        eval_result = self.evaluator.evaluate_run(
+            all_coding_results,
+            merged_post_discussion if merged_post_discussion else None,
             log_fn=self.logger.log
         )
         
