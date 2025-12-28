@@ -38,10 +38,12 @@ The SCALE framework mirrors the process of real-world content analysis through f
 
 -   **Multi-Agent Simulation**: Deploys multiple LLM agents, each with a unique, configurable persona to foster diverse perspectives and robust discussions.
 -   **Praxis-Informed Design**: The workflow is developed in close collaboration with social scientists, ensuring it faithfully reflects the principles and standards of manual content analysis.
--   **Human Intervention**: Provides a flexible portal for human experts to intervene in the. The intervention can be configured by both scope and role:
+-   **Human Intervention**: Provides a flexible portal for human experts to intervene in the workflow. The intervention can be configured by both scope and role:
     -   **Scope**: targeted (discussion phase only) or extensive (discussion and codebook evolution phases).
     -   **Authority**: collaborative (agents may accept or reject advice) or directive (agents must follow instructions).
 -   **Highly Configurable**: The entire simulation—including agent personas, prompts, datasets, and intervention strategies—is controlled via easy-to-edit JSON configuration files.
+-   **Built-in Evaluation & Aggregation**: Reports per-agent and consensus accuracy, agreement rates, and post-discussion improvements, with optional multi-run aggregation.
+-   **CLI Flexibility**: Choose config files, evaluate saved runs, or launch repeated runs for statistics in one command.
 -   **Modular & Extensible**: Built with a clean, object-oriented architecture that separates agents, simulation logic, and utilities, making the code easy to understand and extend.
 
 ## Project Structure
@@ -125,7 +127,7 @@ Due to the sensitive nature of the datasets used in this research, they are not 
 Once you have received the data files:
 
 -   Place your dataset as an `.xlsx` file inside a corresponding folder in `data/` (e.g., `data/CN-NES/data.xlsx`).
--   The Excel file must contain a column named `Text` with the content to be analyzed.
+-   The Excel file must contain a `Text` column with the content to be analyzed **and a `Label` column** with the ground-truth code for evaluation.
 -   Place the initial codebook in a file named `codebook.txt` within the same folder.
 
 > For reference and quick setup, we also provide **an example codebook and dataset** (not used in the paper) in the `data/EXP` directory.
@@ -135,11 +137,22 @@ Once you have received the data files:
 To run the simulation, execute the `main.py` script from the root directory.
 
 ```bash
+# Single run with default config
 python main.py
+
+# Use a specific config file
+python main.py --path ./configs/config.json
+
+# Run multiple times and save aggregate statistics
+python main.py --path ./configs/config.json --runs 5
+
+# Evaluate an existing results JSON without re-running the simulation
+python main.py --path ./configs/config.json --evaluate results/gpt-4.1/2025-12-27_18-54-15_EXP_1/full_simulation_log.json
 ```
 
--   All output, including detailed logs and final results, will be saved to a timestamped folder within the `results/` directory.
--   If intervention is enabled in the config, the program will prompt you for input in the terminal at the appropriate steps.
+-   Per-run outputs live in `results/<model>/<timestamp>_<dataset>_<seed>/` and include `log.txt`, `chunk_<i>_results.json`, `full_simulation_log.json`, and `evaluation_results.json`.
+-   When `--runs` > 1, an aggregate file named `aggregate_<timestamp>_<n>runs.json` is written under `results/<model>/`.
+-   If intervention is enabled, the CLI pauses to collect freeform feedback at the configured phases; press Enter to skip.
 
 ## Citation
 
