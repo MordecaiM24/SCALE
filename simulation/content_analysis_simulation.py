@@ -104,6 +104,8 @@ class ContentAnalysisSimulation:
         full_log = []
         all_coding_results = {}
         all_final_answers = {}
+        all_coding_agreements = {}
+        all_final_agreements = {}
         
         for i, chunk in enumerate(self.text_chunks):
             self.logger.log(f"===== Processing Chunk {i+1}/{len(self.text_chunks)} =====\n")
@@ -111,10 +113,12 @@ class ContentAnalysisSimulation:
             # Bot Annotation
             coding_results, coding_agreements = self._run_coding_phase(chunk)
             all_coding_results.update(coding_results)
+            all_coding_agreements.update(coding_agreements)
             
             # Agent Discussion
             discussion_results, final_answers, final_agreements = self._run_discussion_phase(chunk, coding_results, coding_agreements)
             all_final_answers.update(final_answers)
+            all_final_agreements.update(final_agreements)
             
             # Codebook Evolution
             self._run_codebook_evolution_phase()
@@ -134,21 +138,20 @@ class ContentAnalysisSimulation:
         self.logger.log("EVALUATION RESULTS")
         self.logger.log("=" * 50)
         merged_post_discussion = {}
+        merged_post_discussion_agreements = {}
         for text_id, coding_responses in all_coding_results.items():
             if text_id in all_final_answers:
                 merged_post_discussion[text_id] = all_final_answers[text_id]
+                merged_post_discussion_agreements[text_id] = all_final_agreements.get(text_id, False)
             else:
                 merged_post_discussion[text_id] = coding_responses
+                merged_post_discussion_agreements[text_id] = all_coding_agreements.get(text_id, False)
         
         eval_result = self.evaluator.evaluate_run(
             all_coding_results,
             merged_post_discussion if merged_post_discussion else None,
-            log_fn=self.logger.log
-        )
-
-        eval_result = self.evaluator.evaluate_run(
-            all_coding_results,
-            merged_post_discussion if merged_post_discussion else None,
+            coding_agreements=all_coding_agreements if all_coding_agreements else None,
+            discussion_agreements=merged_post_discussion_agreements if merged_post_discussion_agreements else None,
             log_fn=self.logger.log
         )
         
