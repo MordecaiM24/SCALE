@@ -8,6 +8,7 @@ from agents.mediator_agent import MediatorAgent
 from agents.human_expert import HumanExpert
 from utils.logger import Logger
 from utils.config_loader import load_codebook
+from utils.data_loader import load_dataset, print_dataset_info, DatasetInfo
 from openai import OpenAI
 
 from utils.types import CodingResponse
@@ -25,9 +26,15 @@ class ContentAnalysisSimulation:
         self.chunk_size = config['settings']['chunk_size']
         self.model = config['settings']['model']
 
-        # Load data
+        # Load data with task type detection
         data_file = os.path.join(config['paths']['data_path'], config['dataset_name'], 'data.xlsx')
-        df = pd.read_excel(data_file)
+        task_type_override = config.get('task_type')  # None if not specified, or "class"/"label"
+        self.dataset_info = load_dataset(data_file, task_type_override=task_type_override)
+        
+        # Log dataset info
+        self.logger.log(print_dataset_info(self.dataset_info))
+        
+        df = self.dataset_info.df
         self.text_chunks = [df['Text'][i:i + self.chunk_size] for i in range(0, len(df), self.chunk_size)]
 
         # Coder Simulation
@@ -57,6 +64,11 @@ class ContentAnalysisSimulation:
         
         # Initialize evaluator with ground truth
         self._init_evaluator(df)
+    
+    @property
+    def task_types(self) -> Dict[str, str]:
+        """Get the detected task types for this dataset."""
+        return {name: info.task_type for name, info in self.dataset_info.tasks.items()}
         
 
     def _create_scientists(self) -> List[SocialScientistAgent]:
@@ -74,9 +86,30 @@ class ContentAnalysisSimulation:
         return scientists
     
     def _init_evaluator(self, df):
-        """Initialize the evaluator with ground truth from the dataset."""
-        self.ground_truth = load_ground_truth(df)
-        self.evaluator = Evaluator(self.ground_truth)
+        """Initialize the evaluator with ground truth from the dataset.
+        
+        Uses the first task's ground truth column if available.
+        Falls back to 'Label' column for backwards compatibility.
+        """
+        # Find the first task with a ground truth column and its task type
+        gt_column = None
+        task_type = "class"  # default to multi-class
+        for task_info in self.dataset_info.tasks.values():
+            if task_info.ground_truth_column:
+                gt_column = task_info.ground_truth_column
+                task_type = task_info.task_type
+                break
+            # If no ground truth column, still get task type from first task
+            if task_type == "class":
+                task_type = task_info.task_type
+        
+        self.ground_truth = load_ground_truth(df, ground_truth_column=gt_column)
+        self.evaluator = Evaluator(self.ground_truth, task_type=task_type)
+        
+        if self.ground_truth:
+            self.logger.log(f"Ground truth loaded from column: {gt_column} (task_type: {task_type})\n")
+        else:
+            self.logger.log(f"No ground truth column available. Evaluation will use inter-coder agreement (task_type: {task_type}).\n")
 
 
     def _human_intervention(self, phase: str) -> bool:

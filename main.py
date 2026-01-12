@@ -5,6 +5,7 @@ import pandas as pd
 
 from utils.config_loader import load_config
 from utils.logger import Logger
+from utils.data_loader import load_dataset
 from simulation.content_analysis_simulation import ContentAnalysisSimulation
 from evaluator import Evaluator, load_ground_truth, calc_stats, evaluate_results_file
 
@@ -29,31 +30,63 @@ def run_multiple(config, num_runs):
     
     all_coding_acc = []
     all_disc_acc = []
+    all_coding_agreement = []
+    all_disc_agreement = []
+    has_ground_truth = None
     
     for run_id in range(num_runs):
         print(f"--- Run {run_id + 1}/{num_runs} ---")
         result, log_dir = run_single(config, run_id)
         
-        coding_acc = result.get('coding', {}).get('accuracy', 0)
-        all_coding_acc.append(coding_acc)
+        coding_result = result.get('coding', {})
+        has_ground_truth = coding_result.get('has_ground_truth', False)
+        
+        if has_ground_truth:
+            coding_acc = coding_result.get('accuracy', 0)
+            all_coding_acc.append(coding_acc)
+            print(f"   Coding: {coding_acc:.2%}")
+        
+        if 'agreement_rate' in coding_result:
+            all_coding_agreement.append(coding_result['agreement_rate'])
+            if not has_ground_truth:
+                print(f"   Coding Agreement: {coding_result['agreement_rate']:.2%}")
         
         if result.get('discussion'):
-            all_disc_acc.append(result['discussion']['accuracy'])
-        
-        print(f"   Coding: {coding_acc:.2%}")
+            disc_result = result['discussion']
+            if has_ground_truth and 'accuracy' in disc_result:
+                all_disc_acc.append(disc_result['accuracy'])
+            if 'agreement_rate' in disc_result:
+                all_disc_agreement.append(disc_result['agreement_rate'])
     
     # Aggregate stats
     print("========= AGGREGATE STATISTICS =========")
     
-    stats = calc_stats(all_coding_acc)
-    print(f"\nCoding Accuracy (n={num_runs}):")
-    print(f"  Mean: {stats['mean']:.4f}, Std: {stats['std']:.4f}")
-    print(f"  Min: {stats['min']:.4f}, Max: {stats['max']:.4f}")
+    agg_data = {"num_runs": num_runs, "has_ground_truth": has_ground_truth}
     
-    if all_disc_acc:
-        disc_stats = calc_stats(all_disc_acc)
-        print(f"\nDiscussion Accuracy:")
-        print(f"  Mean: {disc_stats['mean']:.4f}, Std: {disc_stats['std']:.4f}")
+    if has_ground_truth and all_coding_acc:
+        stats = calc_stats(all_coding_acc)
+        print(f"\nCoding Accuracy (n={num_runs}):")
+        print(f"  Mean: {stats['mean']:.4f}, Std: {stats['std']:.4f}")
+        print(f"  Min: {stats['min']:.4f}, Max: {stats['max']:.4f}")
+        agg_data["coding_accuracy"] = stats
+        
+        if all_disc_acc:
+            disc_stats = calc_stats(all_disc_acc)
+            print(f"\nDiscussion Accuracy:")
+            print(f"  Mean: {disc_stats['mean']:.4f}, Std: {disc_stats['std']:.4f}")
+            agg_data["discussion_accuracy"] = disc_stats
+    
+    if all_coding_agreement:
+        agreement_stats = calc_stats(all_coding_agreement)
+        print(f"\nCoding Agreement Rate (n={num_runs}):")
+        print(f"  Mean: {agreement_stats['mean']:.4f}, Std: {agreement_stats['std']:.4f}")
+        agg_data["coding_agreement_rate"] = agreement_stats
+    
+    if all_disc_agreement:
+        disc_agreement_stats = calc_stats(all_disc_agreement)
+        print(f"\nDiscussion Agreement Rate:")
+        print(f"  Mean: {disc_agreement_stats['mean']:.4f}, Std: {disc_agreement_stats['std']:.4f}")
+        agg_data["discussion_agreement_rate"] = disc_agreement_stats
     
     # Save aggregate results
     results_dir = os.path.join(config['paths']['result_path'], config['settings']['model'])
@@ -63,11 +96,7 @@ def run_multiple(config, num_runs):
     agg_file = os.path.join(results_dir, f"aggregate_{datetime.now().strftime('%Y-%m-%d_%H-%M-%S')}_{num_runs}runs.json")
     
     with open(agg_file, 'w') as f:
-        json.dump({
-            "num_runs": num_runs,
-            "coding_accuracy": stats,
-            "discussion_accuracy": calc_stats(all_disc_acc) if all_disc_acc else None
-        }, f, indent=2)
+        json.dump(agg_data, f, indent=2)
     
     print(f"\nResults saved to: {agg_file}")
 
@@ -84,8 +113,16 @@ def main():
     
     if args.evaluate:
         data_path = os.path.join(config['paths']['data_path'], config['dataset_name'], 'data.xlsx')
-        df = pd.read_excel(data_path)
-        ground_truth = load_ground_truth(df)
+        dataset_info = load_dataset(data_path, task_type_override=config.get('task_type'))
+        
+        # Find ground truth column from first task
+        gt_column = None
+        for task_info in dataset_info.tasks.values():
+            if task_info.ground_truth_column:
+                gt_column = task_info.ground_truth_column
+                break
+        
+        ground_truth = load_ground_truth(dataset_info.df, ground_truth_column=gt_column)
         evaluate_results_file(args.evaluate, ground_truth)
         return
     
@@ -93,7 +130,13 @@ def main():
         run_multiple(config, args.runs)
     else:
         result, _ = run_single(config)
-        print(f"\nCoding Accuracy: {result['coding']['accuracy']:.2%}")
+        coding_result = result.get('coding', {})
+        if coding_result.get('has_ground_truth'):
+            print(f"\nCoding Accuracy: {coding_result['accuracy']:.2%}")
+        elif 'agreement_rate' in coding_result:
+            print(f"\nCoding Agreement Rate: {coding_result['agreement_rate']:.2%}")
+        else:
+            print(f"\nCoding Phase: {coding_result.get('total', 0)} texts coded")
 
 
 if __name__ == "__main__":
