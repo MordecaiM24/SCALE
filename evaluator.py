@@ -31,10 +31,12 @@ def jaccard_distance(a: Union[Set, List, str], b: Union[Set, List, str]) -> floa
 
 
 def hamming_distance(a: Union[Set, List, str], b: Union[Set, List, str], 
-                     all_labels: Optional[Set] = None) -> float:
+                     all_labels: Optional[Set] = None,
+                     return_details: bool = False) -> Union[float, Dict[str, Any]]:
     """
     Normalized Hamming distance for multi-label: |A Δ B| / |all_labels|
     If all_labels not provided, uses union of a and b.
+    If return_details=True, returns dict with distance, fp_count, fn_count.
     """
     set_a = _to_set(a)
     set_b = _to_set(b)
@@ -43,10 +45,16 @@ def hamming_distance(a: Union[Set, List, str], b: Union[Set, List, str],
         all_labels = set_a | set_b
     
     if not all_labels:
-        return 0.0
+        return {"distance": 0.0, "fp_count": 0, "fn_count": 0} if return_details else 0.0
     
-    symmetric_diff = len(set_a ^ set_b)
-    return symmetric_diff / len(all_labels)
+    fp = set_a - set_b  # in pred but not truth
+    fn = set_b - set_a  # in truth but not pred
+    distance = (len(fp) + len(fn)) / len(all_labels)
+    
+    if return_details:
+        return {"distance": distance, "fp_count": len(fp), "fn_count": len(fn), 
+                "fp": fp, "fn": fn}
+    return distance
 
 
 def _to_set(value: Union[Set, List, str, Any]) -> Set:
@@ -250,16 +258,27 @@ def accuracy(predictions: List[int], ground_truth: List[int]) -> float:
     return sum(p == t for p, t in zip(predictions, ground_truth)) / len(predictions)
 
 
-def hamming_loss(pred_sets: List[set], truth_sets: List[set]) -> float:
-    """Calculate Hamming loss for multi-label classification."""
+def hamming_loss(pred_sets: List[set], truth_sets: List[set], 
+                 return_details: bool = False) -> Union[float, Dict[str, Any]]:
+    """Calculate Hamming loss for multi-label classification.
+    If return_details=True, returns dict with loss, total_fp, total_fn."""
     if not pred_sets:
-        return 0.0
-    losses = []
+        return {"loss": 0.0, "total_fp": 0, "total_fn": 0} if return_details else 0.0
+    
+    losses, total_fp, total_fn = [], 0, 0
     for pred, truth in zip(pred_sets, truth_sets):
         union = pred | truth
         if union:
-            losses.append(len(pred ^ truth) / len(union))
-    return np.mean(losses) if losses else 0.0
+            fp, fn = len(pred - truth), len(truth - pred)
+            losses.append((fp + fn) / len(union))
+            total_fp += fp
+            total_fn += fn
+    
+    loss = np.mean(losses) if losses else 0.0
+    if return_details:
+        return {"loss": loss, "total_fp": total_fp, "total_fn": total_fn,
+                "fp_rate": total_fp / (total_fp + total_fn) if (total_fp + total_fn) else 0.0}
+    return loss
 
 
 def majority_vote(codes: List[int]) -> int:
