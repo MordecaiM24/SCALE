@@ -12,7 +12,7 @@ def _to_set(value: Union[Set, List, int, Any]) -> Set:
     return frozenset([value])
 
 
-class JudgeAgent:
+class JudgeModule:
     """A judge that judges whether other agents are in agreement."""
     
     def __init__(self, task_type: str = "class"):

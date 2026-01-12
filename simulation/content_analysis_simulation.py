@@ -3,7 +3,7 @@ import os
 from typing import List, Dict, Any, Optional
 
 from agents.social_scientist_agent import SocialScientistAgent
-from agents.judge_agent import JudgeAgent
+from agents.judge_agent import JudgeModule
 from agents.mediator_agent import MediatorAgent
 from agents.human_expert import HumanExpert
 from utils.logger import Logger
@@ -51,7 +51,7 @@ class ContentAnalysisSimulation:
         self.task_type = self._get_primary_task_type()
         
         self.scientists = self._create_scientists()
-        self.judge = JudgeAgent(task_type=self.task_type)
+        self.judge = JudgeModule(task_type=self.task_type)
         self.mediator = MediatorAgent(self.client, self.model, config['prompt']['mediator'])
         self.logger.log(f"Initialized {self.num_agents} Social Scientist Agents For {self.config['dataset_name']} Task.\n")
 
