@@ -1,15 +1,39 @@
 import time
-from typing import List, Dict
+from typing import List, Dict, Optional
 from openai import OpenAI
 from pydantic import BaseModel
 
 class BaseAgent:
-    """A base class for all AI-powered agents."""
+    """A base class for all AI-powered agents.
+    
+    Supports two types of context:
+    1. Conversation context: The immediate back-and-forth with the LLM (reset per phase)
+    2. Session memory: Long-term memory injected as context (persists across phases)
+    """
     def __init__(self, client: OpenAI, model: str, system_prompt: str):
         self.client = client
         self.model = model
-        self.system_prompt = system_prompt
+        self.base_system_prompt = system_prompt  # Original system prompt
+        self.system_prompt = system_prompt  # Current system prompt (may include memory)
+        self.session_memory_context: str = ""  # Long-term memory to inject
         self.context: List[Dict[str, str]] = [{"role": "system", "content": self.system_prompt}]
+
+    def _build_effective_system_prompt(self) -> str:
+        """Builds the effective system prompt including any session memory."""
+        if self.session_memory_context:
+            return f"{self.base_system_prompt}\n\n{self.session_memory_context}"
+        return self.base_system_prompt
+
+    def update_session_memory(self, memory_context: str):
+        """
+        Updates the long-term session memory that persists across context resets.
+        This mirrors how human coders remember past discussions and learnings.
+        """
+        self.session_memory_context = memory_context
+        self.system_prompt = self._build_effective_system_prompt()
+        # Update the system message in current context
+        if self.context and self.context[0]["role"] == "system":
+            self.context[0]["content"] = self.system_prompt
 
     def _generate_answer(self, temperature: float = 0.0, response_format: BaseModel = None) -> BaseModel | str:
         """
@@ -59,6 +83,21 @@ class BaseAgent:
                 return message["content"]
         return ""
 
-    def reset_context(self):
-        """Resets the conversation context to just the system prompt."""
+    def reset_context(self, preserve_memory: bool = True):
+        """
+        Resets the conversation context.
+        
+        Args:
+            preserve_memory: If True, session memory is preserved in the system prompt.
+                           If False, resets to base system prompt only.
+        """
+        if preserve_memory:
+            self.system_prompt = self._build_effective_system_prompt()
+        else:
+            self.system_prompt = self.base_system_prompt
+            self.session_memory_context = ""
         self.context = [{"role": "system", "content": self.system_prompt}]
+    
+    def get_context_length(self) -> int:
+        """Returns the number of messages in current context (for debugging)."""
+        return len(self.context)
