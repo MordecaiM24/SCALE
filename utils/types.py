@@ -1,8 +1,9 @@
+from typing import Union, List
 from pydantic import BaseModel
 
 
 class CodingResponse(BaseModel):
-    code: int
+    code: Union[int, List[int]]  # int for multi-class, List[int] for multi-label
     reasoning: str
 
 

@@ -47,8 +47,11 @@ class ContentAnalysisSimulation:
 
         self.codebook = load_codebook(config['dataset_name'], config['paths']['data_path'])
         
+        # Determine task type for judge (get from first task)
+        self.task_type = self._get_primary_task_type()
+        
         self.scientists = self._create_scientists()
-        self.judge = JudgeAgent()
+        self.judge = JudgeAgent(task_type=self.task_type)
         self.mediator = MediatorAgent(self.client, self.model, config['prompt']['mediator'])
         self.logger.log(f"Initialized {self.num_agents} Social Scientist Agents For {self.config['dataset_name']} Task.\n")
 
@@ -69,7 +72,12 @@ class ContentAnalysisSimulation:
     def task_types(self) -> Dict[str, str]:
         """Get the detected task types for this dataset."""
         return {name: info.task_type for name, info in self.dataset_info.tasks.items()}
-        
+    
+    def _get_primary_task_type(self) -> str:
+        """Get the task type for the primary task (first task in dataset)."""
+        for task_info in self.dataset_info.tasks.values():
+            return task_info.task_type
+        return "class"  # default to multi-class
 
     def _create_scientists(self) -> List[SocialScientistAgent]:
         """Initializes the SocialScientistAgent instances."""
@@ -91,25 +99,20 @@ class ContentAnalysisSimulation:
         Uses the first task's ground truth column if available.
         Falls back to 'Label' column for backwards compatibility.
         """
-        # Find the first task with a ground truth column and its task type
+        # Find the first task with a ground truth column
         gt_column = None
-        task_type = "class"  # default to multi-class
         for task_info in self.dataset_info.tasks.values():
             if task_info.ground_truth_column:
                 gt_column = task_info.ground_truth_column
-                task_type = task_info.task_type
                 break
-            # If no ground truth column, still get task type from first task
-            if task_type == "class":
-                task_type = task_info.task_type
         
         self.ground_truth = load_ground_truth(df, ground_truth_column=gt_column)
-        self.evaluator = Evaluator(self.ground_truth, task_type=task_type)
+        self.evaluator = Evaluator(self.ground_truth, task_type=self.task_type)
         
         if self.ground_truth:
-            self.logger.log(f"Ground truth loaded from column: {gt_column} (task_type: {task_type})\n")
+            self.logger.log(f"Ground truth loaded from column: {gt_column} (task_type: {self.task_type})\n")
         else:
-            self.logger.log(f"No ground truth column available. Evaluation will use inter-coder agreement (task_type: {task_type}).\n")
+            self.logger.log(f"No ground truth column available. Evaluation will use inter-coder agreement (task_type: {self.task_type}).\n")
 
 
     def _human_intervention(self, phase: str) -> bool:
