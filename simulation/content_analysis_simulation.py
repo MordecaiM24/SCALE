@@ -181,7 +181,10 @@ class ContentAnalysisSimulation:
                 self.logger.log(f"Agent {j+1}: {response}\n")
 
             coding_results[text_id] = responses
-            agreement = self.judge.check_agreement(responses)
+            confidence_weighted = self.config['settings'].get('judge', {}).get('confidence_weighted', False)
+            threshold = self.config['settings'].get('confidence_threshold', 0.7)
+            agreement = self.judge.check_agreement(responses, confidence_weighted, threshold)
+            self.judge.record_ratings([r.code for r in responses])
             coding_agreements[text_id] = agreement
             self.logger.log(f"Judge's Verdict: {'Agreement' if agreement else 'Disagreement'}\n")
 
@@ -226,7 +229,10 @@ class ContentAnalysisSimulation:
                     # *** END INTERVENTION ***
 
                     discussion_history.append(next_round_answers)
-                    agreement = self.judge.check_agreement(next_round_answers)
+                    confidence_weighted = self.config['settings'].get('judge', {}).get('confidence_weighted', False)
+                    threshold = self.config['settings'].get('confidence_threshold', 0.7)
+                    agreement = self.judge.check_agreement(next_round_answers, confidence_weighted, threshold)
+                    self.judge.record_ratings([r.code for r in next_round_answers])
                     self.logger.log(f"Judge's Verdict: {'Agreement' if agreement else 'Disagreement'}\n")
                     if agreement:
                         self.logger.log(f"--- Consensus Reached for {text_id} ---\n")
