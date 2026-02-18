@@ -8,6 +8,7 @@ from agents.mediator_agent import MediatorAgent
 from agents.human_expert import HumanExpert
 from utils.logger import Logger
 from utils.config_loader import load_codebook
+from utils.memory import ExemplarStore, CodingMemos, CodebookHistory
 from openai import OpenAI
 
 from utils.types import CodingResponse
@@ -24,6 +25,9 @@ class ContentAnalysisSimulation:
         self.discussion_rounds = config['settings']['rounds']
         self.chunk_size = config['settings']['chunk_size']
         self.model = config['settings']['model']
+        self.memory_config = config['settings'].get('memory', {})
+        self.memory_enabled = self.memory_config.get('enabled', False)
+        self.memory_confidence_threshold = config['settings'].get('confidence_threshold', 0.7)
 
         # Load data
         data_file = os.path.join(config['paths']['data_path'], config['dataset_name'], 'data.xlsx')
@@ -39,6 +43,16 @@ class ContentAnalysisSimulation:
         self.client = OpenAI(**client_kwargs)
 
         self.codebook = load_codebook(config['dataset_name'], config['paths']['data_path'])
+
+        if self.memory_enabled:
+            self.memory = {
+                "exemplars": ExemplarStore(),
+                "memos": CodingMemos(),
+                "codebook_history": CodebookHistory(),
+                "max_memos_in_context": self.memory_config.get('max_memos_in_context', 10),
+            }
+        else:
+            self.memory = None
         
         self.scientists = self._create_scientists()
         self.judge = JudgeAgent()
@@ -69,6 +83,7 @@ class ContentAnalysisSimulation:
                 model=self.model,
                 persona=personas[i],
                 codebook=self.codebook,
+                memory=self.memory if self.memory_enabled else None,
             )
             scientists.append(agent)
         return scientists
@@ -108,6 +123,7 @@ class ContentAnalysisSimulation:
         all_final_agreements = {}
         
         for i, chunk in enumerate(self.text_chunks):
+            self.current_chunk_id = i
             self.logger.log(f"===== Processing Chunk {i+1}/{len(self.text_chunks)} =====\n")
             
             # Bot Annotation
@@ -184,6 +200,29 @@ class ContentAnalysisSimulation:
             agreement = self.judge.check_agreement(responses)
             coding_agreements[text_id] = agreement
             self.logger.log(f"Judge's Verdict: {'Agreement' if agreement else 'Disagreement'}\n")
+
+            if self.memory_enabled and self.memory:
+                for agent_index, response in enumerate(responses):
+                    if response.memo:
+                        self.memory['memos'].add_memo(
+                            agent_id=f"Agent-{agent_index + 1}",
+                            text_id=text_id,
+                            memo_text=response.memo,
+                            category=response.code,
+                        )
+
+                avg_confidence = sum(response.confidence for response in responses) / len(responses)
+                if agreement and avg_confidence > self.memory_confidence_threshold:
+                    exemplar_response = responses[0]
+                    self.memory['exemplars'].add_exemplar(
+                        text=text,
+                        code=exemplar_response.code,
+                        reasoning=exemplar_response.reasoning,
+                        confidence=avg_confidence,
+                        agent_agreement=True,
+                    )
+                    max_per_category = self.memory_config.get('exemplars_per_category', 5)
+                    self.memory['exemplars'].prune(max_per_category=max_per_category)
 
         return coding_results, coding_agreements
 
@@ -310,6 +349,13 @@ class ContentAnalysisSimulation:
         self.codebook = final_codebook
         for agent in self.scientists:
             agent.update_codebook(self.codebook)
+
+        if self.memory_enabled and self.memory:
+            self.memory['codebook_history'].add_version(
+                codebook_text=self.codebook,
+                rationale=mediator_summary,
+                chunk_id=getattr(self, 'current_chunk_id', 0),
+            )
         self.logger.log("--- Final Codebook Adopted and Updated for all Agents. ---\n")
     
     def get_evaluator(self) -> Evaluator:
