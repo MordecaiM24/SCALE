@@ -5,6 +5,7 @@ from typing import List, Dict, Any, Optional
 from agents.social_scientist_agent import SocialScientistAgent
 from agents.judge_agent import JudgeAgent
 from agents.mediator_agent import MediatorAgent
+from agents.pi_agent import PIAgent
 from agents.human_expert import HumanExpert
 from utils.logger import Logger
 from utils.config_loader import load_codebook
@@ -43,6 +44,11 @@ class ContentAnalysisSimulation:
         self.scientists = self._create_scientists()
         self.judge = JudgeAgent()
         self.mediator = MediatorAgent(self.client, self.model, config['prompt']['mediator'])
+        pi_settings = config['settings'].get('pi_agent', {})
+        if pi_settings.get('enabled', False):
+            self.pi_agent = PIAgent(self.client, self.model, config['persona']['PI'], self.codebook)
+        else:
+            self.pi_agent = None
         self.logger.log(f"Initialized {self.num_agents} Social Scientist Agents For {self.config['dataset_name']} Task.\n")
 
         # Intervention settings
@@ -236,6 +242,24 @@ class ContentAnalysisSimulation:
                 discussion_results[text_id] = discussion_history
                 final_answers[text_id] = discussion_history[-1]
 
+                pi_settings = self.config['settings'].get('pi_agent', {})
+                if (not agreement and self.pi_agent is not None
+                        and pi_settings.get('adjudicate_unresolved', False)):
+                    pi_response = self.pi_agent.adjudicate(text, discussion_history[-1], discussion_history)
+                    final_answers[text_id] = [pi_response]
+                    final_agreements[text_id] = True
+                    self.logger.log(f"PI Agent adjudicated {text_id}\n")
+
+                    if hasattr(self, 'memory') and self.memory is not None:
+                        memory_exemplars = None
+                        if isinstance(self.memory, dict):
+                            memory_exemplars = self.memory.get('exemplars')
+                        else:
+                            memory_exemplars = getattr(self.memory, 'exemplars', None)
+
+                        if memory_exemplars is not None and hasattr(memory_exemplars, 'add_exemplar'):
+                            memory_exemplars.add_exemplar(text, pi_response)
+
         return discussion_results, final_answers, final_agreements
 
     def _run_codebook_evolution_phase(self):
@@ -260,6 +284,23 @@ class ContentAnalysisSimulation:
         if all(not p.need_update for p in proposals):
             self.logger.log("--- No codebook changes proposed. Keeping current codebook. ---\n")
             return
+
+        if self.pi_agent is not None:
+            memo_summary = ""
+            if hasattr(self, 'memory') and self.memory is not None:
+                memory_memos = None
+                if isinstance(self.memory, dict):
+                    memory_memos = self.memory.get('memos')
+                else:
+                    memory_memos = getattr(self.memory, 'memos', None)
+
+                if memory_memos is not None and hasattr(memory_memos, 'summarize'):
+                    memo_summary = memory_memos.summarize()
+
+            pi_guidance = self.pi_agent.guide_codebook_evolution(self.codebook, proposals, memo_summary)
+            pi_intervention = f"PI GUIDANCE:\n{pi_guidance}"
+            for agent in self.scientists:
+                agent.inject_intervention(pi_intervention)
             
         # *** HUMAN INTERVENTION POINT (CODEBOOK PROPOSAL) ***
         if self.intervention_enabled and self.intervention_scope == 'extensive':
@@ -310,6 +351,8 @@ class ContentAnalysisSimulation:
         self.codebook = final_codebook
         for agent in self.scientists:
             agent.update_codebook(self.codebook)
+        if self.pi_agent is not None:
+            self.pi_agent.update_codebook(self.codebook)
         self.logger.log("--- Final Codebook Adopted and Updated for all Agents. ---\n")
     
     def get_evaluator(self) -> Evaluator:
