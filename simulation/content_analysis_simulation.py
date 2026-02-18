@@ -152,6 +152,7 @@ class ContentAnalysisSimulation:
             merged_post_discussion if merged_post_discussion else None,
             coding_agreements=all_coding_agreements if all_coding_agreements else None,
             discussion_agreements=merged_post_discussion_agreements if merged_post_discussion_agreements else None,
+            chunk_boundaries=[(int(chunk.index[0]), int(chunk.index[-1])) for chunk in self.text_chunks],
             log_fn=self.logger.log
         )
         
